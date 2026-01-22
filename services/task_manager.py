@@ -90,6 +90,7 @@ class TaskManager:
 
             # Record active message in persistent storage
             await self.store.set_active_time_message(chat_id, message_id)
+            logger.info(f"Saved active message {message_id} for chat {chat_id}")
 
             # Create and start the new task
             task = asyncio.create_task(
@@ -296,6 +297,7 @@ class TaskManager:
         Returns number of tasks resumed.
         """
         active_messages = await self.store.get_all_active_time_messages()
+        logger.info(f"Found {len(active_messages)} active message(s) to resume")
 
         if not active_messages:
             return 0
