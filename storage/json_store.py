@@ -93,6 +93,9 @@ class JsonStore:
             lambda d: StateData.from_dict(d)
         ) or StateData()
 
+        # Log what we loaded
+        logger.info(f"Loaded {len(self._state.active_time_messages)} active time message(s) from state")
+
         # Keep active messages - will be resumed by task manager
 
         # Load cache
