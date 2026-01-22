@@ -167,6 +167,11 @@ class TimeBot:
         # Start auto-delete worker
         await self.services.tasks.start_auto_delete_worker(self.client)
 
+        # Resume any active /time_live tasks from before restart
+        resumed = await self.services.tasks.resume_active_tasks(self.client)
+        if resumed:
+            logger.info(f"Resumed {resumed} live time task(s)")
+
         # Wait for shutdown signal
         await self._shutdown_event.wait()
 

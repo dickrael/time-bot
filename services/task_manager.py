@@ -289,6 +289,56 @@ class TaskManager:
         # Process any pending deletes from before restart
         await self._process_pending_deletes(client)
 
+    async def resume_active_tasks(self, client: "Client") -> int:
+        """
+        Resume all active /time_live tasks from before restart.
+
+        Returns number of tasks resumed.
+        """
+        active_messages = await self.store.get_all_active_time_messages()
+
+        if not active_messages:
+            return 0
+
+        resumed = 0
+        for chat_id, active in active_messages.items():
+            try:
+                # Verify the message still exists by trying to refresh it
+                config = await self.store.get_group_config(chat_id)
+                timezones = await self.store.get_group_timezones(chat_id)
+
+                text = self.tz_service.format_all_times(
+                    timezones,
+                    is_live=True,
+                    show_utc_offset=config.show_utc_offset
+                )
+
+                # Try to edit - if it fails, message was deleted
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=active.message_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML
+                )
+
+                # Start the update task
+                async with self._lock:
+                    task = asyncio.create_task(
+                        self._update_loop(client, chat_id, active.message_id),
+                        name=f"time_live_{chat_id}"
+                    )
+                    self._active_tasks[chat_id] = task
+
+                logger.info(f"Resumed live task for chat {chat_id}, message {active.message_id}")
+                resumed += 1
+
+            except Exception as e:
+                # Message was deleted or bot was removed - clean up
+                logger.info(f"Could not resume live task for chat {chat_id}: {e}")
+                await self.store.clear_active_time_message(chat_id)
+
+        return resumed
+
     async def _auto_delete_loop(self, client: "Client") -> None:
         """Background loop that processes scheduled message deletions."""
         try:

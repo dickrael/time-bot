@@ -93,9 +93,7 @@ class JsonStore:
             lambda d: StateData.from_dict(d)
         ) or StateData()
 
-        # Clear active messages on restart - tasks don't survive restart
-        self._state.active_time_messages = {}
-        await self._save_state()
+        # Keep active messages - will be resumed by task manager
 
         # Load cache
         self._cache = await self._load_file(
@@ -297,6 +295,13 @@ class JsonStore:
         key = str(chat_id)
         async with self._state_lock:
             return self._state.active_time_messages.get(key)
+
+    async def get_all_active_time_messages(self) -> Dict[int, ActiveTimeMessage]:
+        """Get all active /time_live messages for resuming on restart."""
+        async with self._state_lock:
+            return {
+                int(k): v for k, v in self._state.active_time_messages.items()
+            }
 
     async def set_active_time_message(self, chat_id: int, message_id: int) -> None:
         """Record a new active /time_live message."""
