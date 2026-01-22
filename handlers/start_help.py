@@ -106,13 +106,27 @@ def register_start_help_handlers(app: Client, services):
         chat_id = message.chat.id
         is_group = message.chat.type != ChatType.PRIVATE
 
-        # Check owner-only mode for restricted help
-        owner_only = await services.store.get_owner_only_mode()
-        if owner_only and user_id != OWNER_ID:
-            text = get_string("help_text_restricted")
-        else:
-            text = get_string("help_text")
-
-        sent = await message.reply(text, parse_mode=ParseMode.HTML)
         if is_group:
+            # Group chat - show button that opens DM with help
+            text = get_string("help_group")
+
+            bot_username = await get_bot_username(client)
+            deep_link = f"https://t.me/{bot_username}?start=help"
+
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    get_string("help_button"),
+                    url=deep_link
+                )]
+            ])
+            sent = await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
             await schedule_auto_delete(chat_id, sent.id)
+        else:
+            # Private chat - show full help
+            owner_only = await services.store.get_owner_only_mode()
+            if owner_only and user_id != OWNER_ID:
+                text = get_string("help_text_restricted")
+            else:
+                text = get_string("help_text")
+
+            await message.reply(text, parse_mode=ParseMode.HTML)

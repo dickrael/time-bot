@@ -23,6 +23,13 @@ STRINGS = {
 
     "start_button": "How to use",
 
+    "help_group": (
+        "<b>Time Bot Help</b>\n"
+        "Tap the button below for the full command list."
+    ),
+
+    "help_button": "View commands",
+
     "help_text": (
         "<b>Time Bot Commands</b>\n\n"
         "<b>Everyone:</b>\n"
