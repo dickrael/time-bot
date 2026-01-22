@@ -66,6 +66,9 @@ class TaskManager:
         # Lock to prevent race conditions
         self._lock = asyncio.Lock()
 
+        # Flag to indicate shutdown - don't clear messages on shutdown
+        self._shutting_down = False
+
     async def start_time_task(
         self,
         client: "Client",
@@ -260,8 +263,12 @@ class TaskManager:
         """Clean up after a task ends."""
         async with self._lock:
             self._active_tasks.pop(chat_id, None)
-            await self.store.clear_active_time_message(chat_id)
-            logger.debug(f"Cleaned up task for chat {chat_id}")
+            # Don't clear active message during shutdown - we want to resume on restart
+            if not self._shutting_down:
+                await self.store.clear_active_time_message(chat_id)
+                logger.debug(f"Cleaned up task for chat {chat_id}")
+            else:
+                logger.debug(f"Shutdown: keeping active message for chat {chat_id}")
 
     def get_active_task_count(self) -> int:
         """Get the number of currently active tasks."""
@@ -367,6 +374,9 @@ class TaskManager:
     async def shutdown(self) -> None:
         """Gracefully shutdown all active tasks."""
         logger.info("Shutting down task manager...")
+
+        # Set flag so cleanup doesn't clear active messages
+        self._shutting_down = True
 
         # Stop auto-delete worker
         if hasattr(self, '_delete_worker') and self._delete_worker and not self._delete_worker.done():
