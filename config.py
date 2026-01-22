@@ -287,6 +287,13 @@ TIMEZONE_ALIASES = {
     "toronto": "America/Toronto",
     "vancouver": "America/Vancouver",
     "tashkent": "Asia/Tashkent",
+    "istanbul": "Europe/Istanbul",
+    "casablanca": "Africa/Casablanca",
+    "cairo": "Africa/Cairo",
+    "belgrade": "Europe/Belgrade",
+    "bucharest": "Europe/Bucharest",
+    "sofia": "Europe/Sofia",
+    "zagreb": "Europe/Zagreb",
 
     # European shortcuts
     "uk": "Europe/London",
