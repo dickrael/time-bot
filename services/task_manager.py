@@ -323,12 +323,16 @@ class TaskManager:
                 )
 
                 # Try to edit - if it fails, message was deleted
-                await client.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=active.message_id,
-                    text=text,
-                    parse_mode=ParseMode.HTML
-                )
+                try:
+                    await client.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=active.message_id,
+                        text=text,
+                        parse_mode=ParseMode.HTML
+                    )
+                except MessageNotModified:
+                    # Content same - message exists, this is fine
+                    pass
 
                 # Start the update task
                 async with self._lock:
