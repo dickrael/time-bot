@@ -146,6 +146,7 @@ def register_time_handler(app: Client, services):
         # Check if there's already an active live message - delete old one
         old_active = await services.store.get_active_time_message(chat_id)
         if old_active:
+            logger.info(f"Replacing old live message {old_active.message_id} in chat {chat_id}")
             # Stop the existing task
             await services.tasks.stop_time_task(chat_id)
             # Delete the old message

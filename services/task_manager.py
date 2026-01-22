@@ -106,16 +106,18 @@ class TaskManager:
 
         Returns True if a task was stopped.
         """
+        # Get task under lock, but release before awaiting to avoid deadlock
         async with self._lock:
             task = self._active_tasks.get(chat_id)
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                return True
-            return False
+
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return True
+        return False
 
     async def _update_loop(
         self,
