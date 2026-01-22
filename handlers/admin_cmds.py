@@ -141,6 +141,8 @@ def register_admin_handlers(app: Client, services):
         )
         if is_group:
             await schedule_auto_delete(chat_id, sent.id)
+            # Refresh live message if active
+            await services.tasks.refresh_live_message(client, chat_id)
 
         logger.info(f"Added timezone {tz_id} to chat {chat_id} by user {user_id}")
 
@@ -229,6 +231,8 @@ def register_admin_handlers(app: Client, services):
         )
         if is_group:
             await schedule_auto_delete(chat_id, sent.id)
+            # Refresh live message if active
+            await services.tasks.refresh_live_message(client, chat_id)
 
         logger.info(f"Removed timezone {removed_name} from chat {chat_id}")
 

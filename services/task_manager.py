@@ -119,6 +119,48 @@ class TaskManager:
             return True
         return False
 
+    async def refresh_live_message(self, client: "Client", chat_id: int) -> bool:
+        """
+        Immediately refresh the live message for a chat.
+
+        Called when timezones are added/removed to update display instantly.
+        Returns True if a live message was refreshed.
+        """
+        # Check if there's an active live message
+        active = await self.store.get_active_time_message(chat_id)
+        if not active:
+            return False
+
+        # Check if task is still running
+        if not self.is_chat_active(chat_id):
+            return False
+
+        try:
+            # Get current config and timezones
+            config = await self.store.get_group_config(chat_id)
+            timezones = await self.store.get_group_timezones(chat_id)
+
+            # Format the updated message
+            new_text = self.tz_service.format_all_times(
+                timezones,
+                is_live=True,
+                show_utc_offset=config.show_utc_offset
+            )
+
+            # Edit the message
+            await client.edit_message_text(
+                chat_id=chat_id,
+                message_id=active.message_id,
+                text=new_text,
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Refreshed live message in chat {chat_id}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to refresh live message in chat {chat_id}: {e}")
+            return False
+
     async def _update_loop(
         self,
         client: "Client",
