@@ -4,3 +4,4 @@ kurigram
 tgcrypto
 pycountry
 timezonefinder
+pytz

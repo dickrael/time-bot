@@ -6,6 +6,8 @@ Handles:
 - Time formatting with country names
 - Time conversion between timezones
 - IANA timezone validation
+
+Uses pytz + pycountry for automatic country/flag detection.
 """
 
 import logging
@@ -18,117 +20,29 @@ import re
 
 # Handle imports for both direct execution and module execution
 try:
-    from ..config import TIMEZONE_ALIASES, TIMEZONE_COUNTRIES, CLOCK_EMOJIS, COUNTRY_FLAGS
+    from ..config import TIMEZONE_ALIASES, CLOCK_EMOJIS
     from ..storage import JsonStore
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from config import TIMEZONE_ALIASES, TIMEZONE_COUNTRIES, CLOCK_EMOJIS, COUNTRY_FLAGS
+    from config import TIMEZONE_ALIASES, CLOCK_EMOJIS
     from storage import JsonStore
 
-# Try to import pycountry for better country/flag detection
-try:
-    import pycountry
-    HAS_PYCOUNTRY = True
-except ImportError:
-    HAS_PYCOUNTRY = False
+# Import pytz for timezone→country mapping (required)
+import pytz
+
+# Build complete timezone → country code mapping from pytz
+TZ_TO_COUNTRY_CODE: Dict[str, str] = {}
+for country_code, timezones in pytz.country_timezones.items():
+    for tz in timezones:
+        TZ_TO_COUNTRY_CODE[tz] = country_code
+
+# Import pycountry for country names (required)
+import pycountry
 
 logger = logging.getLogger(__name__)
 
 # Pre-compute available timezones for validation
 VALID_TIMEZONES = available_timezones()
-
-# IANA timezone to ISO country code mapping (for common timezones)
-# This supplements pycountry for cases where city → country isn't obvious
-TZ_TO_COUNTRY_CODE = {
-    # Special cases and cities that need explicit mapping
-    "Europe/Istanbul": "TR",
-    "Europe/London": "GB",
-    "Europe/Belfast": "GB",
-    "America/New_York": "US",
-    "America/Los_Angeles": "US",
-    "America/Chicago": "US",
-    "America/Denver": "US",
-    "America/Phoenix": "US",
-    "America/Anchorage": "US",
-    "Asia/Kolkata": "IN",
-    "Asia/Calcutta": "IN",
-    "Asia/Hong_Kong": "HK",
-    "Asia/Tokyo": "JP",
-    "Asia/Seoul": "KR",
-    "Asia/Shanghai": "CN",
-    "Asia/Singapore": "SG",
-    "Asia/Dubai": "AE",
-    "Asia/Tashkent": "UZ",
-    "Asia/Samarkand": "UZ",
-    "Europe/Moscow": "RU",
-    "Europe/Paris": "FR",
-    "Europe/Berlin": "DE",
-    "Europe/Rome": "IT",
-    "Europe/Madrid": "ES",
-    "Europe/Amsterdam": "NL",
-    "Europe/Brussels": "BE",
-    "Europe/Vienna": "AT",
-    "Europe/Zurich": "CH",
-    "Europe/Stockholm": "SE",
-    "Europe/Oslo": "NO",
-    "Europe/Copenhagen": "DK",
-    "Europe/Helsinki": "FI",
-    "Europe/Warsaw": "PL",
-    "Europe/Prague": "CZ",
-    "Europe/Budapest": "HU",
-    "Europe/Athens": "GR",
-    "Europe/Lisbon": "PT",
-    "Europe/Dublin": "IE",
-    "Europe/Belgrade": "RS",
-    "Europe/Bucharest": "RO",
-    "Europe/Sofia": "BG",
-    "Europe/Zagreb": "HR",
-    "Europe/Ljubljana": "SI",
-    "Europe/Bratislava": "SK",
-    "Europe/Sarajevo": "BA",
-    "Europe/Skopje": "MK",
-    "Europe/Podgorica": "ME",
-    "Europe/Tirana": "AL",
-    "Europe/Riga": "LV",
-    "Europe/Vilnius": "LT",
-    "Europe/Tallinn": "EE",
-    "Europe/Minsk": "BY",
-    "Europe/Chisinau": "MD",
-    "Europe/Kiev": "UA",
-    "Europe/Kyiv": "UA",
-    "Australia/Sydney": "AU",
-    "Australia/Melbourne": "AU",
-    "Australia/Brisbane": "AU",
-    "Australia/Perth": "AU",
-    "Australia/Adelaide": "AU",
-    "Pacific/Auckland": "NZ",
-    "Africa/Cairo": "EG",
-    "Africa/Johannesburg": "ZA",
-    "Africa/Lagos": "NG",
-    "Africa/Nairobi": "KE",
-    "Africa/Casablanca": "MA",
-    "America/Toronto": "CA",
-    "America/Vancouver": "CA",
-    "America/Mexico_City": "MX",
-    "America/Sao_Paulo": "BR",
-    "America/Buenos_Aires": "AR",
-    "America/Argentina/Buenos_Aires": "AR",
-    "America/Lima": "PE",
-    "America/Bogota": "CO",
-    "America/Santiago": "CL",
-    "Asia/Manila": "PH",
-    "Asia/Bangkok": "TH",
-    "Asia/Jakarta": "ID",
-    "Asia/Kuala_Lumpur": "MY",
-    "Asia/Ho_Chi_Minh": "VN",
-    "Asia/Riyadh": "SA",
-    "Asia/Tehran": "IR",
-    "Asia/Jerusalem": "IL",
-    "Asia/Karachi": "PK",
-    "Asia/Dhaka": "BD",
-    "Asia/Taipei": "TW",
-    "Asia/Almaty": "KZ",
-}
 
 
 class TimezoneService:
@@ -136,22 +50,20 @@ class TimezoneService:
     Service for timezone operations.
 
     Uses Python's zoneinfo for reliable timezone handling.
+    Country/flag detection via pytz + pycountry (no manual mappings).
     """
 
     def __init__(self, store: JsonStore):
         self.store = store
         self._alias_map = TIMEZONE_ALIASES.copy()
-        self._country_map = TIMEZONE_COUNTRIES.copy()
-        self._flag_map = COUNTRY_FLAGS.copy()
+
+    def _country_code_to_flag(self, country_code: str) -> str:
+        """Convert ISO 3166-1 alpha-2 country code to flag emoji."""
+        return "".join(chr(0x1F1E6 + ord(char) - ord('A')) for char in country_code.upper())
 
     def get_country(self, tz_id: str) -> str:
-        """Get country name for a timezone ID."""
-        # First try our manual mapping
-        if tz_id in self._country_map:
-            return self._country_map[tz_id]
-
-        # Try to get country from IANA → country code mapping + pycountry
-        if HAS_PYCOUNTRY and tz_id in TZ_TO_COUNTRY_CODE:
+        """Get country name for a timezone ID using pytz + pycountry."""
+        if tz_id in TZ_TO_COUNTRY_CODE:
             country_code = TZ_TO_COUNTRY_CODE[tz_id]
             try:
                 country = pycountry.countries.get(alpha_2=country_code)
@@ -159,52 +71,26 @@ class TimezoneService:
                     return country.name
             except Exception:
                 pass
-
         return ""
 
-    def get_flag(self, country: str) -> str:
-        """Get flag emoji for a country name."""
-        # First try our manual mapping
-        if country in self._flag_map:
-            return self._flag_map[country]
-
-        # Try to get flag from pycountry
-        if HAS_PYCOUNTRY and country:
-            try:
-                # Try to find by name
-                c = pycountry.countries.search_fuzzy(country)
-                if c:
-                    # Convert country code to flag emoji
-                    code = c[0].alpha_2
-                    flag = "".join(chr(0x1F1E6 + ord(char) - ord('A')) for char in code)
-                    return flag
-            except Exception:
-                pass
-
+    def get_flag(self, tz_id: str) -> str:
+        """Get flag emoji for a timezone ID."""
+        if tz_id in TZ_TO_COUNTRY_CODE:
+            country_code = TZ_TO_COUNTRY_CODE[tz_id]
+            return self._country_code_to_flag(country_code)
         return ""
 
     def get_country_and_flag(self, tz_id: str) -> Tuple[str, str]:
         """Get both country name and flag for a timezone ID."""
-        # First try our manual mapping
-        if tz_id in self._country_map:
-            country = self._country_map[tz_id]
-            flag = self._flag_map.get(country, "")
-            if not flag and HAS_PYCOUNTRY:
-                flag = self.get_flag(country)
-            return country, flag
-
-        # Try pycountry with TZ mapping
-        if HAS_PYCOUNTRY and tz_id in TZ_TO_COUNTRY_CODE:
+        if tz_id in TZ_TO_COUNTRY_CODE:
             country_code = TZ_TO_COUNTRY_CODE[tz_id]
             try:
                 country_obj = pycountry.countries.get(alpha_2=country_code)
                 if country_obj:
-                    # Convert country code to flag emoji
-                    flag = "".join(chr(0x1F1E6 + ord(char) - ord('A')) for char in country_code)
+                    flag = self._country_code_to_flag(country_code)
                     return country_obj.name, flag
             except Exception:
                 pass
-
         return "", ""
 
     def get_clock_emoji(self, hour: int) -> str:
@@ -405,7 +291,7 @@ class TimezoneService:
 
         src_display = self._make_display_name(from_tz)
         src_country = self.get_country(from_tz)
-        src_flag = self.get_flag(src_country)
+        src_flag = self.get_flag(from_tz)
 
         if src_country and src_flag:
             src_full = f"{src_flag} {src_display}, {src_country}"
@@ -427,7 +313,7 @@ class TimezoneService:
                 target_dt = src_dt.astimezone(target_tz)
                 target_time = self.format_time(target_dt)
                 country = self.get_country(tz_id)
-                flag = self.get_flag(country)
+                flag = self.get_flag(tz_id)
 
                 day_diff = target_dt.date() - src_dt.date()
                 if day_diff.days == 1:
@@ -500,7 +386,7 @@ class TimezoneService:
         dt = self.get_current_time(tz_id)
         day = dt.strftime("%A")
         country = self.get_country(tz_id)
-        flag = self.get_flag(country)
+        flag = self.get_flag(tz_id)
 
         if country and flag:
             location = f"{flag} {display_name}, {country}"
