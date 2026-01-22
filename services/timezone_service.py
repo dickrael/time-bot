@@ -102,13 +102,15 @@ class TimezoneService:
         Resolve a timezone query to (IANA_ID, display_name).
 
         Returns None if timezone cannot be resolved.
+        Only returns timezones that exist in VALID_TIMEZONES.
         """
         query = query.strip()
         query_lower = query.lower()
+        logger.debug(f"Resolving timezone query: '{query}' (lower: '{query_lower}')")
 
-        # Check cache first
+        # Check cache first (but validate it's still valid)
         cached = await self.store.get_cached_timezone(query_lower)
-        if cached:
+        if cached and cached in VALID_TIMEZONES:
             return (cached, self._make_display_name(cached))
 
         # 1. Direct IANA ID match
@@ -122,11 +124,14 @@ class TimezoneService:
                 await self.store.cache_timezone(query_lower, tz)
                 return (tz, self._make_display_name(tz))
 
-        # 3. Check configured aliases
+        # 3. Check configured aliases (validate the target timezone)
         if query_lower in self._alias_map:
             tz_id = self._alias_map[query_lower]
-            await self.store.cache_timezone(query_lower, tz_id)
-            return (tz_id, self._make_display_name(tz_id))
+            if tz_id in VALID_TIMEZONES:
+                await self.store.cache_timezone(query_lower, tz_id)
+                return (tz_id, self._make_display_name(tz_id))
+            else:
+                logger.warning(f"Alias '{query_lower}' points to invalid timezone: {tz_id}")
 
         # 4. Partial match on city name in IANA IDs
         for tz in VALID_TIMEZONES:
