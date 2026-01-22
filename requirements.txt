@@ -2,3 +2,5 @@
 
 kurigram
 tgcrypto
+pycountry
+timezonefinder
