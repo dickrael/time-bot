@@ -1,0 +1,14 @@
+{
+  "active_time_messages": {
+    "-1002455890516": {
+      "message_id": 7312,
+      "started_at": "2026-01-21T20:18:31.111961Z"
+    }
+  },
+  "user_cooldowns": {
+    "-1002455890516:674193259": {
+      "expires_at": "2026-01-21T20:17:46.622044Z",
+      "last_message_id": 7304
+    }
+  }
+}

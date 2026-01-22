@@ -1,0 +1,10 @@
+{
+  "active_time_messages": {},
+  "user_cooldowns": {
+    "-1002455890516:674193259": {
+      "expires_at": "2026-01-21T20:17:46.622044Z",
+      "last_message_id": 7304
+    }
+  },
+  "owner_only_mode": false
+}

@@ -1,0 +1,6 @@
+# This directory stores JSON data files
+# Files created at runtime:
+# - groups.json
+# - users.json
+# - state.json
+# - cache.json

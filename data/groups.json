@@ -1,0 +1,15 @@
+{
+  "-1002455890516": {
+    "timezones": {
+      "asia_tashkent": {
+        "tz": "Asia/Tashkent",
+        "display_name": "Tashkent",
+        "added_by": 674193259,
+        "added_at": "2026-01-21T17:20:37.403212Z"
+      }
+    },
+    "config": {
+      "cooldown_seconds": 30
+    }
+  }
+}
