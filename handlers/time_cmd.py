@@ -143,10 +143,13 @@ def register_time_handler(app: Client, services):
             )
             return
 
-        # Check if there's already an active live message
-        if services.tasks.is_chat_active(chat_id):
-            # Stop the existing task (will be replaced)
+        # Check if there's already an active live message - delete old one
+        old_active = await services.store.get_active_time_message(chat_id)
+        if old_active:
+            # Stop the existing task
             await services.tasks.stop_time_task(chat_id)
+            # Delete the old message
+            await safe_delete_message(client, chat_id, old_active.message_id)
 
         # Get group config and timezones
         config = await services.store.get_group_config(chat_id)
