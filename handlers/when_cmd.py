@@ -7,6 +7,7 @@ Usage: /when 18:00 Tokyo
 
 import logging
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pyrogram import Client, filters
@@ -20,11 +21,19 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from langs import get_string
 
+# Auto-delete delay for this command (seconds)
+AUTO_DELETE_DELAY = 45
+
 logger = logging.getLogger(__name__)
 
 
 def register_when_handler(app: Client, services):
     """Register the /when command handler."""
+
+    async def schedule_auto_delete(chat_id: int, message_id: int):
+        """Schedule a message for auto-deletion in groups."""
+        delete_at = datetime.utcnow() + timedelta(seconds=AUTO_DELETE_DELAY)
+        await services.store.schedule_delete(chat_id, message_id, delete_at)
 
     @app.on_message(filters.command("when"))
     async def handle_when(client: Client, message: Message):
@@ -36,10 +45,6 @@ def register_when_handler(app: Client, services):
         - User's timezone (if set)
 
         Usage: /when <time> <timezone>
-        Examples:
-            /when 18:00 Tokyo
-            /when 3pm PST
-            /when 1400 UTC
         """
         user_id = message.from_user.id if message.from_user else 0
         chat_id = message.chat.id
@@ -49,7 +54,7 @@ def register_when_handler(app: Client, services):
         args = message.text.split(maxsplit=2)
 
         if len(args) < 3:
-            await message.reply(
+            sent = await message.reply(
                 "📖 <b>Usage:</b> <code>/when &lt;time&gt; &lt;timezone&gt;</code>\n\n"
                 "<b>Examples:</b>\n"
                 "• <code>/when 18:00 Tokyo</code>\n"
@@ -61,6 +66,8 @@ def register_when_handler(app: Client, services):
                 "• 12-hour: <code>6pm</code>, <code>3:30am</code>",
                 parse_mode=ParseMode.HTML
             )
+            if not is_private:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         time_str = args[1]
@@ -69,7 +76,7 @@ def register_when_handler(app: Client, services):
         # Resolve the source timezone
         resolved = await services.timezone.resolve_timezone(tz_query)
         if not resolved:
-            await message.reply(
+            sent = await message.reply(
                 f"❌ <b>Unknown Timezone</b>\n\n"
                 f"Could not resolve <code>{tz_query}</code>.\n\n"
                 f"Try using:\n"
@@ -78,6 +85,8 @@ def register_when_handler(app: Client, services):
                 f"• IANA IDs: <code>America/New_York</code>",
                 parse_mode=ParseMode.HTML
             )
+            if not is_private:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         source_tz, source_name = resolved
@@ -112,10 +121,12 @@ def register_when_handler(app: Client, services):
                     "Add group timezones with <code>/addtime &lt;city&gt;</code> or\n"
                     "set your personal timezone with <code>/settimezone &lt;city&gt;</code>."
                 )
-            await message.reply(
+            sent = await message.reply(
                 f"ℹ️ <b>No timezones to convert to</b>\n\n{hint}",
                 parse_mode=ParseMode.HTML
             )
+            if not is_private:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         # Perform the conversion
@@ -126,7 +137,7 @@ def register_when_handler(app: Client, services):
         )
 
         if result is None:
-            await message.reply(
+            sent = await message.reply(
                 f"❌ <b>Invalid Time Format</b>\n\n"
                 f"Could not parse <code>{time_str}</code>.\n\n"
                 f"<b>Supported formats:</b>\n"
@@ -134,9 +145,15 @@ def register_when_handler(app: Client, services):
                 f"• 12-hour: <code>6pm</code>, <code>3:30am</code>, <code>12:00pm</code>",
                 parse_mode=ParseMode.HTML
             )
+            if not is_private:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
-        await message.reply(result, parse_mode=ParseMode.HTML)
+        sent = await message.reply(result, parse_mode=ParseMode.HTML)
+
+        # Auto-delete in groups
+        if not is_private:
+            await schedule_auto_delete(chat_id, sent.id)
 
         logger.info(
             f"Time conversion by user {user_id}: "

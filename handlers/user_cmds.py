@@ -5,16 +5,25 @@ Handles personal timezone management for users.
 """
 
 import logging
+from datetime import datetime, timedelta
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ChatType, ParseMode
+
+# Auto-delete delay for user commands in groups (seconds)
+AUTO_DELETE_DELAY = 30
 
 logger = logging.getLogger(__name__)
 
 
 def register_user_handlers(app: Client, services):
     """Register user command handlers."""
+
+    async def schedule_auto_delete(chat_id: int, message_id: int):
+        """Schedule a message for auto-deletion in groups."""
+        delete_at = datetime.utcnow() + timedelta(seconds=AUTO_DELETE_DELAY)
+        await services.store.schedule_delete(chat_id, message_id, delete_at)
 
     @app.on_message(filters.command("settimezone"))
     async def handle_settimezone(client: Client, message: Message):
@@ -25,9 +34,13 @@ def register_user_handlers(app: Client, services):
         Usage: /settimezone <city or timezone>
         """
         user_id = message.from_user.id if message.from_user else 0
+        chat_id = message.chat.id
+        is_group = message.chat.type != ChatType.PRIVATE
 
         if not user_id:
-            await message.reply("❌ Could not identify user.")
+            sent = await message.reply("❌ Could not identify user.")
+            if is_group:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         # Parse arguments
@@ -45,7 +58,7 @@ def register_user_handlers(app: Client, services):
             else:
                 current = "<b>Current timezone:</b> Not set\n\n"
 
-            await message.reply(
+            sent = await message.reply(
                 f"📍 <b>Set Your Timezone</b>\n\n"
                 f"{current}"
                 f"<b>Usage:</b> <code>/settimezone &lt;city or timezone&gt;</code>\n\n"
@@ -57,6 +70,8 @@ def register_user_handlers(app: Client, services):
                 f"• <code>/settimezone UK</code>",
                 parse_mode=ParseMode.HTML
             )
+            if is_group:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         tz_query = args[1].strip()
@@ -65,7 +80,7 @@ def register_user_handlers(app: Client, services):
         resolved = await services.timezone.resolve_timezone(tz_query)
 
         if not resolved:
-            await message.reply(
+            sent = await message.reply(
                 f"❌ <b>Unknown Timezone</b>\n\n"
                 f"Could not resolve <code>{tz_query}</code>.\n\n"
                 f"<b>Try using:</b>\n"
@@ -75,6 +90,8 @@ def register_user_handlers(app: Client, services):
                 f"• IANA IDs: <code>America/New_York</code>, <code>Europe/London</code>",
                 parse_mode=ParseMode.HTML
             )
+            if is_group:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         tz_id, display_name = resolved
@@ -85,12 +102,14 @@ def register_user_handlers(app: Client, services):
         # Show confirmation with current time
         time_display = services.timezone.get_user_time_display(tz_id, display_name)
 
-        await message.reply(
+        sent = await message.reply(
             f"✅ <b>Timezone Set!</b>\n\n"
             f"{time_display}\n\n"
             f"<i>Use /timehere to check your time anytime.</i>",
             parse_mode=ParseMode.HTML
         )
+        if is_group:
+            await schedule_auto_delete(chat_id, sent.id)
 
         logger.info(f"User {user_id} set timezone to {tz_id}")
 
@@ -103,20 +122,26 @@ def register_user_handlers(app: Client, services):
         Alias for checking timezone without changing it.
         """
         user_id = message.from_user.id if message.from_user else 0
+        chat_id = message.chat.id
+        is_group = message.chat.type != ChatType.PRIVATE
 
         if not user_id:
-            await message.reply("❌ Could not identify user.")
+            sent = await message.reply("❌ Could not identify user.")
+            if is_group:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         user_data = await services.store.get_user_timezone(user_id)
 
         if not user_data:
-            await message.reply(
+            sent = await message.reply(
                 "📍 <b>No Timezone Set</b>\n\n"
                 "You haven't set your timezone yet.\n\n"
                 "Set it with <code>/settimezone &lt;city&gt;</code>",
                 parse_mode=ParseMode.HTML
             )
+            if is_group:
+                await schedule_auto_delete(chat_id, sent.id)
             return
 
         time_display = services.timezone.get_user_time_display(
@@ -124,8 +149,10 @@ def register_user_handlers(app: Client, services):
             user_data.display_name
         )
 
-        await message.reply(
+        sent = await message.reply(
             f"{time_display}\n\n"
             f"<i>Change with /settimezone &lt;city&gt;</i>",
             parse_mode=ParseMode.HTML
         )
+        if is_group:
+            await schedule_auto_delete(chat_id, sent.id)

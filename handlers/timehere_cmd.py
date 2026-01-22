@@ -5,10 +5,16 @@ Shows the current time for the user based on their personal timezone.
 """
 
 import logging
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ChatType, ParseMode
+
+# Auto-delete delay for this command (seconds)
+AUTO_DELETE_DELAY = 30
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +26,7 @@ def register_timehere_handler(app: Client, services):
     async def handle_timehere(client: Client, message: Message):
         """Show user's current time based on their timezone setting."""
         user_id = message.from_user.id if message.from_user else 0
+        is_group = message.chat.type != ChatType.PRIVATE
 
         if not user_id:
             await message.reply("Could not identify user.")
@@ -29,7 +36,7 @@ def register_timehere_handler(app: Client, services):
         user_data = await services.store.get_user_timezone(user_id)
 
         if not user_data:
-            await message.reply(
+            sent = await message.reply(
                 "<b>No Timezone Set</b>\n\n"
                 "Set your timezone with:\n"
                 "<code>/settimezone &lt;city&gt;</code>\n\n"
@@ -39,6 +46,10 @@ def register_timehere_handler(app: Client, services):
                 "• <code>/settimezone Tashkent</code>",
                 parse_mode=ParseMode.HTML
             )
+            # Auto-delete in groups
+            if is_group:
+                delete_at = datetime.utcnow() + timedelta(seconds=AUTO_DELETE_DELAY)
+                await services.store.schedule_delete(message.chat.id, sent.id, delete_at)
             return
 
         # Show user's current time
@@ -48,6 +59,11 @@ def register_timehere_handler(app: Client, services):
         )
         text += "\n\n<i>Update with /settimezone &lt;city&gt;</i>"
 
-        await message.reply(text, parse_mode=ParseMode.HTML)
+        sent = await message.reply(text, parse_mode=ParseMode.HTML)
+
+        # Auto-delete in groups
+        if is_group:
+            delete_at = datetime.utcnow() + timedelta(seconds=AUTO_DELETE_DELAY)
+            await services.store.schedule_delete(message.chat.id, sent.id, delete_at)
 
         logger.info(f"/timehere by user {user_id} ({user_data.timezone})")
