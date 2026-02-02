@@ -130,6 +130,7 @@ class TimeBot:
         # Create services
         timezone_service = TimezoneService(store)
         await timezone_service.load_api_timezones()  # Load valid timezones from WorldTimeAPI
+        await timezone_service.warmup()  # Warm up API connection
         task_manager = TaskManager(store, timezone_service)
         permission_service = PermissionService()
 

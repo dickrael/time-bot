@@ -136,6 +136,18 @@ class TimezoneService:
             logger.warning(f"Failed to load API timezones: {e}")
             return False
 
+    async def warmup(self) -> None:
+        """Warm up the API connection by fetching a test timezone."""
+        try:
+            # Pre-warm the connection with a simple request
+            result = await self._fetch_time_from_api("UTC")
+            if result:
+                logger.info("WorldTimeAPI connection warmed up successfully")
+            else:
+                logger.warning("WorldTimeAPI warmup failed, will retry on first use")
+        except Exception as e:
+            logger.debug(f"Warmup error (will retry): {e}")
+
     def _country_code_to_flag(self, country_code: str) -> str:
         """Convert ISO 3166-1 alpha-2 country code to flag emoji."""
         return "".join(chr(0x1F1E6 + ord(char) - ord('A')) for char in country_code.upper())
@@ -256,8 +268,8 @@ class TimezoneService:
             return city.replace("_", " ")
         return tz_id
 
-    async def _fetch_time_from_api(self, tz_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch current time from WorldTimeAPI."""
+    async def _fetch_time_from_api(self, tz_id: str, retry: bool = True) -> Optional[Dict[str, Any]]:
+        """Fetch current time from WorldTimeAPI with retry."""
         # Check against API's valid timezone list if available
         if WORLDTIME_VALID_TZS and tz_id not in WORLDTIME_VALID_TZS:
             logger.debug(f"Timezone not in API list: {tz_id}")
@@ -268,38 +280,43 @@ class TimezoneService:
             logger.debug(f"Skipping invalid timezone ID for API: {tz_id}")
             return None
 
-        try:
-            session = await self._get_session()
-            url = f"{WORLDTIME_API_URL}/{tz_id}"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # Parse the datetime string
-                    dt_str = data.get("datetime", "")
-                    utc_offset = data.get("utc_offset", "+00:00")
+        max_attempts = 2 if retry else 1
+        last_error = None
 
-                    # Parse ISO format datetime
-                    # Format: "2026-02-02T15:04:22.333448+05:00"
-                    dt = datetime.fromisoformat(dt_str)
+        for attempt in range(max_attempts):
+            try:
+                session = await self._get_session()
+                url = f"{WORLDTIME_API_URL}/{tz_id}"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        dt_str = data.get("datetime", "")
+                        utc_offset = data.get("utc_offset", "+00:00")
+                        dt = datetime.fromisoformat(dt_str)
 
-                    logger.info(f"WorldTimeAPI: {tz_id} = {dt.strftime('%H:%M:%S')}")
-                    return {
-                        "datetime": dt,
-                        "utc_offset": utc_offset,
-                        "fetched_at": time.time()
-                    }
-                else:
-                    logger.warning(f"WorldTimeAPI returned {response.status} for {tz_id}")
-                    return None
-        except asyncio.TimeoutError:
-            logger.debug(f"Timeout fetching time for {tz_id}")
-            return None
-        except aiohttp.ClientError as e:
-            logger.debug(f"Network error fetching time for {tz_id}: {e}")
-            return None
-        except Exception as e:
-            logger.debug(f"Error fetching time from API for {tz_id}: {e}")
-            return None
+                        # Only log on first successful batch, not every call
+                        logger.debug(f"WorldTimeAPI: {tz_id} = {dt.strftime('%H:%M:%S')}")
+                        return {
+                            "datetime": dt,
+                            "utc_offset": utc_offset,
+                            "fetched_at": time.time()
+                        }
+                    else:
+                        last_error = f"HTTP {response.status}"
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+            except aiohttp.ClientError as e:
+                last_error = str(e)
+            except Exception as e:
+                last_error = str(e)
+
+            # Small delay before retry
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(0.1)
+
+        # Only log if all retries failed
+        logger.debug(f"API failed for {tz_id}: {last_error}")
+        return None
 
     def _get_cached_time(self, tz_id: str) -> Optional[datetime]:
         """Get cached time if still valid."""
@@ -325,8 +342,8 @@ class TimezoneService:
             self._time_cache[tz_id] = api_result
             return api_result["datetime"]
 
-        # Fallback to local zoneinfo
-        logger.warning(f"Fallback to local time for {tz_id}")
+        # Fallback to local zoneinfo (debug level - not a critical issue)
+        logger.debug(f"Using local time for {tz_id}")
         return self.get_current_time(tz_id)
 
     def get_current_time(self, tz_id: str) -> datetime:
@@ -350,9 +367,15 @@ class TimezoneService:
         tasks = [self._fetch_time_from_api(tz) for tz in to_fetch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        success_count = 0
         for tz_id, result in zip(to_fetch, results):
             if isinstance(result, dict) and result:
                 self._time_cache[tz_id] = result
+                success_count += 1
+
+        # Log summary instead of individual results
+        if to_fetch:
+            logger.info(f"WorldTimeAPI: fetched {success_count}/{len(to_fetch)} timezones")
 
     def format_time(self, dt: datetime, include_seconds: bool = False) -> str:
         """Format a datetime for display."""
