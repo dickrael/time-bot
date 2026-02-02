@@ -41,6 +41,15 @@ for country_code, timezones in pytz.country_timezones.items():
     for tz in timezones:
         TZ_TO_COUNTRY_CODE[tz] = country_code
 
+# Add mappings for deprecated/link timezone IDs
+TZ_TO_COUNTRY_CODE.update({
+    "Asia/Tel_Aviv": "IL",  # Link to Asia/Jerusalem
+    "Israel": "IL",         # Legacy name
+    "HST": "US",            # Hawaii Standard Time
+    "NZ-CHAT": "NZ",        # Chatham Islands
+    "Pacific/Samoa": "WS",  # Samoa
+})
+
 # Import pycountry for country names (required)
 import pycountry
 
