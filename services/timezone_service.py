@@ -216,6 +216,7 @@ class TimezoneService:
                     # Format: "2026-02-02T15:04:22.333448+05:00"
                     dt = datetime.fromisoformat(dt_str)
 
+                    logger.info(f"WorldTimeAPI: {tz_id} = {dt.strftime('%H:%M:%S')}")
                     return {
                         "datetime": dt,
                         "utc_offset": utc_offset,
@@ -259,7 +260,7 @@ class TimezoneService:
             return api_result["datetime"]
 
         # Fallback to local zoneinfo
-        logger.debug(f"Falling back to local time for {tz_id}")
+        logger.warning(f"Fallback to local time for {tz_id}")
         return self.get_current_time(tz_id)
 
     def get_current_time(self, tz_id: str) -> datetime:
