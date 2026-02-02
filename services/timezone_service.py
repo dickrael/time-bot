@@ -197,6 +197,11 @@ class TimezoneService:
 
     async def _fetch_time_from_api(self, tz_id: str) -> Optional[Dict[str, Any]]:
         """Fetch current time from WorldTimeAPI."""
+        # Only fetch valid IANA timezone IDs (must contain '/')
+        if "/" not in tz_id and tz_id != "UTC":
+            logger.debug(f"Skipping invalid timezone ID for API: {tz_id}")
+            return None
+
         try:
             session = await self._get_session()
             url = f"{WORLDTIME_API_URL}/{tz_id}"
@@ -220,10 +225,13 @@ class TimezoneService:
                     logger.warning(f"WorldTimeAPI returned {response.status} for {tz_id}")
                     return None
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout fetching time for {tz_id}")
+            logger.debug(f"Timeout fetching time for {tz_id}")
+            return None
+        except aiohttp.ClientError as e:
+            logger.debug(f"Network error fetching time for {tz_id}: {e}")
             return None
         except Exception as e:
-            logger.warning(f"Error fetching time from API for {tz_id}: {e}")
+            logger.debug(f"Error fetching time from API for {tz_id}: {e}")
             return None
 
     def _get_cached_time(self, tz_id: str) -> Optional[datetime]:
