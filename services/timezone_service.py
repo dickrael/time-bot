@@ -63,6 +63,9 @@ WORLDTIME_API_URL = "http://worldtimeapi.org/api/timezone"
 TIME_CACHE_TTL = 30  # Cache time data for 30 seconds
 API_TIMEOUT = 10  # API request timeout in seconds
 
+# Valid timezones from WorldTimeAPI (populated at startup)
+WORLDTIME_VALID_TZS: set = set()
+
 
 class TimezoneService:
     """
@@ -93,6 +96,24 @@ class TimezoneService:
         """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+
+    async def load_api_timezones(self) -> bool:
+        """Fetch and cache the list of valid timezones from WorldTimeAPI."""
+        global WORLDTIME_VALID_TZS
+        try:
+            session = await self._get_session()
+            async with session.get(WORLDTIME_API_URL) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    WORLDTIME_VALID_TZS = set(data)
+                    logger.info(f"Loaded {len(WORLDTIME_VALID_TZS)} valid timezones from WorldTimeAPI")
+                    return True
+                else:
+                    logger.warning(f"Failed to load API timezones: status {response.status}")
+                    return False
+        except Exception as e:
+            logger.warning(f"Failed to load API timezones: {e}")
+            return False
 
     def _country_code_to_flag(self, country_code: str) -> str:
         """Convert ISO 3166-1 alpha-2 country code to flag emoji."""
@@ -208,7 +229,12 @@ class TimezoneService:
 
     async def _fetch_time_from_api(self, tz_id: str) -> Optional[Dict[str, Any]]:
         """Fetch current time from WorldTimeAPI."""
-        # Only fetch valid IANA timezone IDs (must contain '/')
+        # Check against API's valid timezone list if available
+        if WORLDTIME_VALID_TZS and tz_id not in WORLDTIME_VALID_TZS:
+            logger.debug(f"Timezone not in API list: {tz_id}")
+            return None
+
+        # Fallback check: only fetch valid IANA timezone IDs (must contain '/')
         if "/" not in tz_id and tz_id != "UTC":
             logger.debug(f"Skipping invalid timezone ID for API: {tz_id}")
             return None

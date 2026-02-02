@@ -129,6 +129,7 @@ class TimeBot:
 
         # Create services
         timezone_service = TimezoneService(store)
+        await timezone_service.load_api_timezones()  # Load valid timezones from WorldTimeAPI
         task_manager = TaskManager(store, timezone_service)
         permission_service = PermissionService()
 
@@ -185,6 +186,7 @@ class TimeBot:
         # Stop all active tasks
         if self.services:
             await self.services.tasks.shutdown()
+            await self.services.timezone.close()  # Close HTTP session
 
         # Stop the client
         if self.client:
