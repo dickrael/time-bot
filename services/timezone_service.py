@@ -267,7 +267,7 @@ class TimezoneService:
         lines.append("<blockquote>" + "\n".join(blockquote_lines) + "</blockquote>")
 
         if is_live:
-            lines.append("\n<i>🔄 Live updates every 25s</i>")
+            lines.append("\n<i>🔄 Live updates every 60s</i>")
 
         return "\n".join(lines)
 

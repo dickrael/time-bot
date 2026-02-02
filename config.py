@@ -28,7 +28,7 @@ CACHE_FILE = DATA_DIR / "cache.json"
 DATA_DIR.mkdir(exist_ok=True)
 
 # Time settings
-TIME_UPDATE_INTERVAL = 25  # seconds between live message updates
+TIME_UPDATE_INTERVAL = 60  # seconds between live message updates
 TIME_COOLDOWN_SECONDS = 30  # default cooldown for /time command per user
 
 # Clock emojis for different hours (0-23)
@@ -132,7 +132,10 @@ TIMEZONE_COUNTRIES = {
     "Australia/Perth": "Australia",
     "Australia/Adelaide": "Australia",
     "Pacific/Auckland": "New Zealand",
+    "Pacific/Chatham": "New Zealand",
     "Pacific/Fiji": "Fiji",
+    "Pacific/Honolulu": "USA",
+    "Pacific/Guam": "USA",
 
     # Africa
     "Africa/Cairo": "Egypt",
@@ -332,6 +335,25 @@ TIMEZONE_ALIASES = {
     "australia": "Australia/Sydney",
     "canada": "America/Toronto",
     "uzbekistan": "Asia/Tashkent",
+
+    # Pacific / Special timezones
+    "chatham": "Pacific/Chatham",
+    "nz-chat": "Pacific/Chatham",
+    "chatham islands": "Pacific/Chatham",
+    "chathamislands": "Pacific/Chatham",
+    "hawaii": "Pacific/Honolulu",
+    "hst": "Pacific/Honolulu",
+    "honolulu": "Pacific/Honolulu",
+    "fiji": "Pacific/Fiji",
+    "samoa": "Pacific/Samoa",
+    "tahiti": "Pacific/Tahiti",
+    "guam": "Pacific/Guam",
+
+    # Israel (prevent duplicates)
+    "israel": "Asia/Jerusalem",
+    "tel aviv": "Asia/Jerusalem",
+    "telaviv": "Asia/Jerusalem",
+    "jerusalem": "Asia/Jerusalem",
 }
 
 # Bot commands to register
