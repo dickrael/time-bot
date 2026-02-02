@@ -45,10 +45,30 @@ for country_code, timezones in pytz.country_timezones.items():
 TZ_TO_COUNTRY_CODE.update({
     "Asia/Tel_Aviv": "IL",  # Link to Asia/Jerusalem
     "Israel": "IL",         # Legacy name
+    "Turkey": "TR",         # Legacy name for Europe/Istanbul
+    "Egypt": "EG",          # Legacy name
     "HST": "US",            # Hawaii Standard Time
     "NZ-CHAT": "NZ",        # Chatham Islands
     "Pacific/Samoa": "WS",  # Samoa
 })
+
+# Auto-generate country name -> main timezone mappings
+COUNTRY_TO_TIMEZONE: Dict[str, str] = {}
+for country_code, tz_list in pytz.country_timezones.items():
+    if tz_list:
+        main_tz = tz_list[0]  # First timezone is usually the main one
+        try:
+            country_obj = pycountry.countries.get(alpha_2=country_code)
+            if country_obj:
+                # Add country name (lowercase)
+                COUNTRY_TO_TIMEZONE[country_obj.name.lower()] = main_tz
+                # Add common name if different
+                if hasattr(country_obj, 'common_name'):
+                    COUNTRY_TO_TIMEZONE[country_obj.common_name.lower()] = main_tz
+        except Exception:
+            pass
+
+logger.info(f"Auto-generated {len(COUNTRY_TO_TIMEZONE)} country->timezone mappings")
 
 # Import pycountry for country names (required)
 import pycountry
@@ -171,18 +191,7 @@ class TimezoneService:
         if cached and cached in VALID_TIMEZONES:
             return (cached, self._make_display_name(cached))
 
-        # 1. Direct IANA ID match
-        if query in VALID_TIMEZONES:
-            await self.store.cache_timezone(query_lower, query)
-            return (query, self._make_display_name(query))
-
-        # 2. Case-insensitive IANA ID match
-        for tz in VALID_TIMEZONES:
-            if tz.lower() == query_lower:
-                await self.store.cache_timezone(query_lower, tz)
-                return (tz, self._make_display_name(tz))
-
-        # 3. Check configured aliases (validate the target timezone)
+        # 1. Check configured aliases FIRST (maps common names to proper IANA IDs)
         if query_lower in self._alias_map:
             tz_id = self._alias_map[query_lower]
             if tz_id in VALID_TIMEZONES:
@@ -190,6 +199,25 @@ class TimezoneService:
                 return (tz_id, self._make_display_name(tz_id))
             else:
                 logger.warning(f"Alias '{query_lower}' points to invalid timezone: {tz_id}")
+
+        # 1b. Check auto-generated country name mappings
+        if query_lower in COUNTRY_TO_TIMEZONE:
+            tz_id = COUNTRY_TO_TIMEZONE[query_lower]
+            if tz_id in VALID_TIMEZONES:
+                await self.store.cache_timezone(query_lower, tz_id)
+                return (tz_id, self._make_display_name(tz_id))
+
+        # 2. Direct IANA ID match (only for proper Area/Location format)
+        if "/" in query and query in VALID_TIMEZONES:
+            await self.store.cache_timezone(query_lower, query)
+            return (query, self._make_display_name(query))
+
+        # 3. Case-insensitive IANA ID match (only for proper Area/Location format)
+        if "/" in query:
+            for tz in VALID_TIMEZONES:
+                if tz.lower() == query_lower:
+                    await self.store.cache_timezone(query_lower, tz)
+                    return (tz, self._make_display_name(tz))
 
         # 4. Partial match on city name in IANA IDs
         for tz in VALID_TIMEZONES:

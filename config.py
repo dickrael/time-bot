@@ -354,6 +354,33 @@ TIMEZONE_ALIASES = {
     "tel aviv": "Asia/Jerusalem",
     "telaviv": "Asia/Jerusalem",
     "jerusalem": "Asia/Jerusalem",
+
+    # Country names -> capital/main timezone
+    "turkey": "Europe/Istanbul",
+    "türkiye": "Europe/Istanbul",
+    "egypt": "Africa/Cairo",
+    "nigeria": "Africa/Lagos",
+    "kenya": "Africa/Nairobi",
+    "morocco": "Africa/Casablanca",
+    "south africa": "Africa/Johannesburg",
+    "uae": "Asia/Dubai",
+    "saudi arabia": "Asia/Riyadh",
+    "pakistan": "Asia/Karachi",
+    "bangladesh": "Asia/Dhaka",
+    "indonesia": "Asia/Jakarta",
+    "philippines": "Asia/Manila",
+    "vietnam": "Asia/Ho_Chi_Minh",
+    "thailand": "Asia/Bangkok",
+    "malaysia": "Asia/Kuala_Lumpur",
+    "singapore": "Asia/Singapore",
+    "taiwan": "Asia/Taipei",
+    "hong kong": "Asia/Hong_Kong",
+    "new zealand": "Pacific/Auckland",
+    "iran": "Asia/Tehran",
+    "iraq": "Asia/Baghdad",
+    "ethiopia": "Africa/Addis_Ababa",
+    "zambia": "Africa/Lusaka",
+    "gabon": "Africa/Libreville",
 }
 
 # Bot commands to register
