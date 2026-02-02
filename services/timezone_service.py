@@ -7,16 +7,21 @@ Handles:
 - Time conversion between timezones
 - IANA timezone validation
 
+Uses WorldTimeAPI for accurate time fetching.
 Uses pytz + pycountry for automatic country/flag detection.
 """
 
+import asyncio
 import logging
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 from zoneinfo import ZoneInfo, available_timezones
 import re
+
+import aiohttp
 
 # Handle imports for both direct execution and module execution
 try:
@@ -44,18 +49,39 @@ logger = logging.getLogger(__name__)
 # Pre-compute available timezones for validation
 VALID_TIMEZONES = available_timezones()
 
+# WorldTimeAPI settings
+WORLDTIME_API_URL = "http://worldtimeapi.org/api/timezone"
+TIME_CACHE_TTL = 30  # Cache time data for 30 seconds
+API_TIMEOUT = 10  # API request timeout in seconds
+
 
 class TimezoneService:
     """
     Service for timezone operations.
 
-    Uses Python's zoneinfo for reliable timezone handling.
+    Uses WorldTimeAPI for accurate time fetching with caching.
     Country/flag detection via pytz + pycountry (no manual mappings).
     """
 
     def __init__(self, store: JsonStore):
         self.store = store
         self._alias_map = TIMEZONE_ALIASES.copy()
+        # Cache: {tz_id: {"datetime": datetime_obj, "utc_offset": str, "fetched_at": timestamp}}
+        self._time_cache: Dict[str, Dict[str, Any]] = {}
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
+            )
+        return self._session
+
+    async def close(self):
+        """Close the aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     def _country_code_to_flag(self, country_code: str) -> str:
         """Convert ISO 3166-1 alpha-2 country code to flag emoji."""
@@ -169,14 +195,89 @@ class TimezoneService:
             return city.replace("_", " ")
         return tz_id
 
+    async def _fetch_time_from_api(self, tz_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch current time from WorldTimeAPI."""
+        try:
+            session = await self._get_session()
+            url = f"{WORLDTIME_API_URL}/{tz_id}"
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Parse the datetime string
+                    dt_str = data.get("datetime", "")
+                    utc_offset = data.get("utc_offset", "+00:00")
+
+                    # Parse ISO format datetime
+                    # Format: "2026-02-02T15:04:22.333448+05:00"
+                    dt = datetime.fromisoformat(dt_str)
+
+                    return {
+                        "datetime": dt,
+                        "utc_offset": utc_offset,
+                        "fetched_at": time.time()
+                    }
+                else:
+                    logger.warning(f"WorldTimeAPI returned {response.status} for {tz_id}")
+                    return None
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout fetching time for {tz_id}")
+            return None
+        except Exception as e:
+            logger.warning(f"Error fetching time from API for {tz_id}: {e}")
+            return None
+
+    def _get_cached_time(self, tz_id: str) -> Optional[datetime]:
+        """Get cached time if still valid."""
+        if tz_id in self._time_cache:
+            cached = self._time_cache[tz_id]
+            age = time.time() - cached["fetched_at"]
+            if age < TIME_CACHE_TTL:
+                # Adjust cached time by elapsed seconds
+                elapsed = timedelta(seconds=age)
+                return cached["datetime"] + elapsed
+        return None
+
+    async def get_current_time_async(self, tz_id: str) -> datetime:
+        """Get the current time in a specific timezone using WorldTimeAPI."""
+        # Check cache first
+        cached = self._get_cached_time(tz_id)
+        if cached:
+            return cached
+
+        # Fetch from API
+        api_result = await self._fetch_time_from_api(tz_id)
+        if api_result:
+            self._time_cache[tz_id] = api_result
+            return api_result["datetime"]
+
+        # Fallback to local zoneinfo
+        logger.debug(f"Falling back to local time for {tz_id}")
+        return self.get_current_time(tz_id)
+
     def get_current_time(self, tz_id: str) -> datetime:
-        """Get the current time in a specific timezone."""
+        """Get the current time in a specific timezone (sync fallback)."""
         try:
             tz = ZoneInfo(tz_id)
             return datetime.now(tz)
         except Exception as e:
             logger.error(f"Error getting time for {tz_id}: {e}")
             return datetime.now(ZoneInfo("UTC"))
+
+    async def prefetch_times(self, tz_ids: List[str]) -> None:
+        """Prefetch times for multiple timezones in parallel."""
+        # Filter out already cached
+        to_fetch = [tz for tz in tz_ids if self._get_cached_time(tz) is None]
+
+        if not to_fetch:
+            return
+
+        # Fetch all in parallel
+        tasks = [self._fetch_time_from_api(tz) for tz in to_fetch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for tz_id, result in zip(to_fetch, results):
+            if isinstance(result, dict) and result:
+                self._time_cache[tz_id] = result
 
     def format_time(self, dt: datetime, include_seconds: bool = False) -> str:
         """Format a datetime for display."""
@@ -220,7 +321,7 @@ class TimezoneService:
         else:
             return f"{location}: <b>{time_str}</b>"
 
-    def format_all_times(
+    async def format_all_times(
         self,
         timezones: Dict[str, "TimezoneEntry"],
         is_live: bool = False,
@@ -229,23 +330,30 @@ class TimezoneService:
         """
         Format current times for all group timezones.
 
+        Uses WorldTimeAPI for accurate times. Fetches all in parallel.
         Uses blockquote formatting. Sorted earliest to latest by UTC offset.
         """
         if not timezones:
             return "No timezones configured for this group.\n\nAdmins can add timezones with /addtime <code>&lt;city&gt;</code>"
 
+        # Prefetch all times in parallel
+        tz_ids = [entry.tz for entry in timezones.values()]
+        await self.prefetch_times(tz_ids)
+
         lines = ["<b>Current Times</b>\n"]
 
+        # Get times and sort by UTC offset
+        tz_times: List[Tuple["TimezoneEntry", datetime]] = []
+        for entry in timezones.values():
+            dt = await self.get_current_time_async(entry.tz)
+            tz_times.append((entry, dt))
+
         # Sort by UTC offset (earliest → latest)
-        sorted_tzs = sorted(
-            timezones.values(),
-            key=lambda e: self.get_current_time(e.tz).utcoffset() or timedelta(0)
-        )
+        tz_times.sort(key=lambda x: x[1].utcoffset() or timedelta(0))
 
         # Build blockquote with entries
         blockquote_lines = []
-        for entry in sorted_tzs:
-            dt = self.get_current_time(entry.tz)
+        for entry, dt in tz_times:
             time_str = self.format_time(dt)
             country, flag = self.get_country_and_flag(entry.tz)
 
@@ -386,9 +494,9 @@ class TimezoneService:
 
         return None
 
-    def get_user_time_display(self, tz_id: str, display_name: str) -> str:
+    async def get_user_time_display(self, tz_id: str, display_name: str) -> str:
         """Format user's current time for /timehere."""
-        dt = self.get_current_time(tz_id)
+        dt = await self.get_current_time_async(tz_id)
         day = dt.strftime("%A")
         country = self.get_country(tz_id)
         flag = self.get_flag(tz_id)

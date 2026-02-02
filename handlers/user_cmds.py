@@ -100,7 +100,7 @@ def register_user_handlers(app: Client, services):
         await services.store.set_user_timezone(user_id, tz_id, display_name)
 
         # Show confirmation with current time
-        time_display = services.timezone.get_user_time_display(tz_id, display_name)
+        time_display = await services.timezone.get_user_time_display(tz_id, display_name)
 
         sent = await message.reply(
             f"✅ <b>Timezone Set!</b>\n\n"
@@ -144,7 +144,7 @@ def register_user_handlers(app: Client, services):
                 await schedule_auto_delete(chat_id, sent.id)
             return
 
-        time_display = services.timezone.get_user_time_display(
+        time_display = await services.timezone.get_user_time_display(
             user_data.timezone,
             user_data.display_name
         )

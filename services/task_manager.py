@@ -145,7 +145,7 @@ class TaskManager:
             timezones = await self.store.get_group_timezones(chat_id)
 
             # Format the updated message
-            new_text = self.tz_service.format_all_times(
+            new_text = await self.tz_service.format_all_times(
                 timezones,
                 is_live=True,
                 show_utc_offset=config.show_utc_offset
@@ -190,7 +190,7 @@ class TaskManager:
                 timezones = await self.store.get_group_timezones(chat_id)
 
                 # Format the updated message (with is_live=True)
-                new_text = self.tz_service.format_all_times(
+                new_text = await self.tz_service.format_all_times(
                     timezones,
                     is_live=True,
                     show_utc_offset=config.show_utc_offset
@@ -316,7 +316,7 @@ class TaskManager:
                 config = await self.store.get_group_config(chat_id)
                 timezones = await self.store.get_group_timezones(chat_id)
 
-                text = self.tz_service.format_all_times(
+                text = await self.tz_service.format_all_times(
                     timezones,
                     is_live=True,
                     show_utc_offset=config.show_utc_offset
