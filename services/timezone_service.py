@@ -73,8 +73,10 @@ class TimezoneService:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(limit=10)  # Limit concurrent connections
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
+                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+                connector=connector
             )
         return self._session
 
