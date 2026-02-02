@@ -68,7 +68,7 @@ for country_code, tz_list in pytz.country_timezones.items():
         except Exception:
             pass
 
-logger.info(f"Auto-generated {len(COUNTRY_TO_TIMEZONE)} country->timezone mappings")
+# Logging done at class init since logger not available at module level
 
 # Import pycountry for country names (required)
 import pycountry
@@ -101,6 +101,7 @@ class TimezoneService:
         # Cache: {tz_id: {"datetime": datetime_obj, "utc_offset": str, "fetched_at": timestamp}}
         self._time_cache: Dict[str, Dict[str, Any]] = {}
         self._session: Optional[aiohttp.ClientSession] = None
+        logger.info(f"Loaded {len(COUNTRY_TO_TIMEZONE)} auto-generated country->timezone mappings")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
