@@ -99,12 +99,14 @@ def register_admin_handlers(app: Client, services):
 
         if not resolved:
             sent = await message.reply(
-                f"❌ <b>Unknown Timezone</b>\n\n"
-                f"Could not resolve <code>{tz_query}</code>.\n\n"
-                f"<b>Try using:</b>\n"
-                f"• City names: <code>Tokyo</code>, <code>London</code>, <code>Paris</code>\n"
-                f"• Abbreviations: <code>PST</code>, <code>EST</code>, <code>CET</code>\n"
-                f"• IANA IDs: <code>America/New_York</code>",
+                f"❌ <b>Unknown Timezone:</b> <code>{tz_query}</code>\n\n"
+                f"<b>Examples:</b>\n"
+                f"• <code>/addtime London</code>\n"
+                f"• <code>/addtime New York</code>\n"
+                f"• <code>/addtime Tokyo</code>\n"
+                f"• <code>/addtime Germany</code>\n"
+                f"• <code>/addtime America/Chicago</code>\n\n"
+                f"<i>Use city names, country names, or IANA timezone IDs</i>",
                 parse_mode=ParseMode.HTML
             )
             if is_group:
@@ -112,6 +114,22 @@ def register_admin_handlers(app: Client, services):
             return
 
         tz_id, display_name = resolved
+
+        # Validate timezone works with WorldTimeAPI
+        from services.timezone_service import WORLDTIME_VALID_TZS
+        if WORLDTIME_VALID_TZS and tz_id not in WORLDTIME_VALID_TZS:
+            sent = await message.reply(
+                f"❌ <b>Invalid Timezone:</b> <code>{tz_query}</code>\n\n"
+                f"This timezone is not supported by the time API.\n\n"
+                f"<b>Examples:</b>\n"
+                f"• <code>/addtime London</code>\n"
+                f"• <code>/addtime New York</code>\n"
+                f"• <code>/addtime Tokyo</code>",
+                parse_mode=ParseMode.HTML
+            )
+            if is_group:
+                await schedule_auto_delete(chat_id, sent.id)
+            return
 
         # Try to add the timezone
         success = await services.store.add_group_timezone(
