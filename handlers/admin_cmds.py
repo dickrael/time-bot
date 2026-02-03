@@ -115,22 +115,6 @@ def register_admin_handlers(app: Client, services):
 
         tz_id, display_name = resolved
 
-        # Validate timezone works with WorldTimeAPI
-        from services.timezone_service import WORLDTIME_VALID_TZS
-        if WORLDTIME_VALID_TZS and tz_id not in WORLDTIME_VALID_TZS:
-            sent = await message.reply(
-                f"❌ <b>Invalid Timezone:</b> <code>{tz_query}</code>\n\n"
-                f"This timezone is not supported by the time API.\n\n"
-                f"<b>Examples:</b>\n"
-                f"• <code>/addtime London</code>\n"
-                f"• <code>/addtime New York</code>\n"
-                f"• <code>/addtime Tokyo</code>",
-                parse_mode=ParseMode.HTML
-            )
-            if is_group:
-                await schedule_auto_delete(chat_id, sent.id)
-            return
-
         # Try to add the timezone
         success = await services.store.add_group_timezone(
             chat_id, tz_id, display_name, user_id

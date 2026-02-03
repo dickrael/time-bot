@@ -7,21 +7,17 @@ Handles:
 - Time conversion between timezones
 - IANA timezone validation
 
-Uses WorldTimeAPI for accurate time fetching.
+Uses local zoneinfo + tzdata for accurate time calculation.
 Uses pytz + pycountry for automatic country/flag detection.
 """
 
-import asyncio
 import logging
 import sys
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict
 from zoneinfo import ZoneInfo, available_timezones
 import re
-
-import aiohttp
 
 # Handle imports for both direct execution and module execution
 try:
@@ -41,35 +37,6 @@ for country_code, timezones in pytz.country_timezones.items():
     for tz in timezones:
         TZ_TO_COUNTRY_CODE[tz] = country_code
 
-# Add mappings for deprecated/link timezone IDs
-TZ_TO_COUNTRY_CODE.update({
-    "Asia/Tel_Aviv": "IL",  # Link to Asia/Jerusalem
-    "Israel": "IL",         # Legacy name
-    "Turkey": "TR",         # Legacy name for Europe/Istanbul
-    "Egypt": "EG",          # Legacy name
-    "HST": "US",            # Hawaii Standard Time
-    "NZ-CHAT": "NZ",        # Chatham Islands
-    "Pacific/Samoa": "WS",  # Samoa
-})
-
-# Auto-generate country name -> main timezone mappings
-COUNTRY_TO_TIMEZONE: Dict[str, str] = {}
-for country_code, tz_list in pytz.country_timezones.items():
-    if tz_list:
-        main_tz = tz_list[0]  # First timezone is usually the main one
-        try:
-            country_obj = pycountry.countries.get(alpha_2=country_code)
-            if country_obj:
-                # Add country name (lowercase)
-                COUNTRY_TO_TIMEZONE[country_obj.name.lower()] = main_tz
-                # Add common name if different
-                if hasattr(country_obj, 'common_name'):
-                    COUNTRY_TO_TIMEZONE[country_obj.common_name.lower()] = main_tz
-        except Exception:
-            pass
-
-# Logging done at class init since logger not available at module level
-
 # Import pycountry for country names (required)
 import pycountry
 
@@ -78,75 +45,44 @@ logger = logging.getLogger(__name__)
 # Pre-compute available timezones for validation
 VALID_TIMEZONES = available_timezones()
 
-# WorldTimeAPI settings
-WORLDTIME_API_URL = "http://worldtimeapi.org/api/timezone"
-TIME_CACHE_TTL = 30  # Cache time data for 30 seconds
-API_TIMEOUT = 10  # API request timeout in seconds
+# Add mappings for deprecated/link timezone IDs
+TZ_TO_COUNTRY_CODE.update({
+    "Asia/Tel_Aviv": "IL",
+    "Israel": "IL",
+    "Turkey": "TR",
+    "Egypt": "EG",
+    "HST": "US",
+    "NZ-CHAT": "NZ",
+    "Pacific/Samoa": "WS",
+})
 
-# Valid timezones from WorldTimeAPI (populated at startup)
-WORLDTIME_VALID_TZS: set = set()
+# Auto-generate country name -> main timezone mappings
+COUNTRY_TO_TIMEZONE: Dict[str, str] = {}
+for country_code, tz_list in pytz.country_timezones.items():
+    if tz_list:
+        main_tz = tz_list[0]
+        try:
+            country_obj = pycountry.countries.get(alpha_2=country_code)
+            if country_obj:
+                COUNTRY_TO_TIMEZONE[country_obj.name.lower()] = main_tz
+                if hasattr(country_obj, 'common_name'):
+                    COUNTRY_TO_TIMEZONE[country_obj.common_name.lower()] = main_tz
+        except Exception:
+            pass
 
 
 class TimezoneService:
     """
     Service for timezone operations.
 
-    Uses WorldTimeAPI for accurate time fetching with caching.
-    Country/flag detection via pytz + pycountry (no manual mappings).
+    Uses Python's zoneinfo for reliable timezone handling.
+    Country/flag detection via pytz + pycountry.
     """
 
     def __init__(self, store: JsonStore):
         self.store = store
         self._alias_map = TIMEZONE_ALIASES.copy()
-        # Cache: {tz_id: {"datetime": datetime_obj, "utc_offset": str, "fetched_at": timestamp}}
-        self._time_cache: Dict[str, Dict[str, Any]] = {}
-        self._session: Optional[aiohttp.ClientSession] = None
-        logger.info(f"Loaded {len(COUNTRY_TO_TIMEZONE)} auto-generated country->timezone mappings")
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session."""
-        if self._session is None or self._session.closed:
-            connector = aiohttp.TCPConnector(limit=10)  # Limit concurrent connections
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
-                connector=connector
-            )
-        return self._session
-
-    async def close(self):
-        """Close the aiohttp session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
-
-    async def load_api_timezones(self) -> bool:
-        """Fetch and cache the list of valid timezones from WorldTimeAPI."""
-        global WORLDTIME_VALID_TZS
-        try:
-            session = await self._get_session()
-            async with session.get(WORLDTIME_API_URL) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    WORLDTIME_VALID_TZS = set(data)
-                    logger.info(f"Loaded {len(WORLDTIME_VALID_TZS)} valid timezones from WorldTimeAPI")
-                    return True
-                else:
-                    logger.warning(f"Failed to load API timezones: status {response.status}")
-                    return False
-        except Exception as e:
-            logger.warning(f"Failed to load API timezones: {e}")
-            return False
-
-    async def warmup(self) -> None:
-        """Warm up the API connection by fetching a test timezone."""
-        try:
-            # Pre-warm the connection with a simple request
-            result = await self._fetch_time_from_api("UTC")
-            if result:
-                logger.info("WorldTimeAPI connection warmed up successfully")
-            else:
-                logger.warning("WorldTimeAPI warmup failed, will retry on first use")
-        except Exception as e:
-            logger.debug(f"Warmup error (will retry): {e}")
+        logger.info(f"Loaded {len(COUNTRY_TO_TIMEZONE)} country->timezone mappings")
 
     def _country_code_to_flag(self, country_code: str) -> str:
         """Convert ISO 3166-1 alpha-2 country code to flag emoji."""
@@ -197,42 +133,39 @@ class TimezoneService:
         """
         query = query.strip()
         query_lower = query.lower()
-        logger.debug(f"Resolving timezone query: '{query}' (lower: '{query_lower}')")
 
-        # Check cache first (but validate it's still valid)
+        # Check cache first
         cached = await self.store.get_cached_timezone(query_lower)
         if cached and cached in VALID_TIMEZONES:
             return (cached, self._make_display_name(cached))
 
-        # 1. Check configured aliases FIRST (maps common names to proper IANA IDs)
+        # 1. Check configured aliases FIRST
         if query_lower in self._alias_map:
             tz_id = self._alias_map[query_lower]
             if tz_id in VALID_TIMEZONES:
                 await self.store.cache_timezone(query_lower, tz_id)
                 return (tz_id, self._make_display_name(tz_id))
-            else:
-                logger.warning(f"Alias '{query_lower}' points to invalid timezone: {tz_id}")
 
-        # 1b. Check auto-generated country name mappings
+        # 2. Check auto-generated country name mappings
         if query_lower in COUNTRY_TO_TIMEZONE:
             tz_id = COUNTRY_TO_TIMEZONE[query_lower]
             if tz_id in VALID_TIMEZONES:
                 await self.store.cache_timezone(query_lower, tz_id)
                 return (tz_id, self._make_display_name(tz_id))
 
-        # 2. Direct IANA ID match (only for proper Area/Location format)
+        # 3. Direct IANA ID match (only for proper Area/Location format)
         if "/" in query and query in VALID_TIMEZONES:
             await self.store.cache_timezone(query_lower, query)
             return (query, self._make_display_name(query))
 
-        # 3. Case-insensitive IANA ID match (only for proper Area/Location format)
+        # 4. Case-insensitive IANA ID match
         if "/" in query:
             for tz in VALID_TIMEZONES:
                 if tz.lower() == query_lower:
                     await self.store.cache_timezone(query_lower, tz)
                     return (tz, self._make_display_name(tz))
 
-        # 4. Partial match on city name in IANA IDs
+        # 5. Partial match on city name in IANA IDs
         for tz in VALID_TIMEZONES:
             parts = tz.split("/")
             if len(parts) >= 2:
@@ -241,7 +174,7 @@ class TimezoneService:
                     await self.store.cache_timezone(query_lower, tz)
                     return (tz, self._make_display_name(tz))
 
-        # 5. Fuzzy match - timezone contains query
+        # 6. Fuzzy match - timezone contains query
         matches = []
         for tz in VALID_TIMEZONES:
             if query_lower in tz.lower():
@@ -258,7 +191,6 @@ class TimezoneService:
             await self.store.cache_timezone(query_lower, tz_id)
             return (tz_id, self._make_display_name(tz_id))
 
-        logger.warning(f"Could not resolve timezone: {query}")
         return None
 
     def _make_display_name(self, tz_id: str) -> str:
@@ -268,114 +200,14 @@ class TimezoneService:
             return city.replace("_", " ")
         return tz_id
 
-    async def _fetch_time_from_api(self, tz_id: str, retry: bool = True) -> Optional[Dict[str, Any]]:
-        """Fetch current time from WorldTimeAPI with retry."""
-        # Check against API's valid timezone list if available
-        if WORLDTIME_VALID_TZS and tz_id not in WORLDTIME_VALID_TZS:
-            logger.debug(f"Timezone not in API list: {tz_id}")
-            return None
-
-        # Fallback check: only fetch valid IANA timezone IDs (must contain '/')
-        if "/" not in tz_id and tz_id != "UTC":
-            logger.debug(f"Skipping invalid timezone ID for API: {tz_id}")
-            return None
-
-        max_attempts = 2 if retry else 1
-        last_error = None
-
-        for attempt in range(max_attempts):
-            try:
-                session = await self._get_session()
-                url = f"{WORLDTIME_API_URL}/{tz_id}"
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        dt_str = data.get("datetime", "")
-                        utc_offset = data.get("utc_offset", "+00:00")
-                        dt = datetime.fromisoformat(dt_str)
-
-                        # Only log on first successful batch, not every call
-                        logger.debug(f"WorldTimeAPI: {tz_id} = {dt.strftime('%H:%M:%S')}")
-                        return {
-                            "datetime": dt,
-                            "utc_offset": utc_offset,
-                            "fetched_at": time.time()
-                        }
-                    else:
-                        last_error = f"HTTP {response.status}"
-            except asyncio.TimeoutError:
-                last_error = "timeout"
-            except aiohttp.ClientError as e:
-                last_error = str(e)
-            except Exception as e:
-                last_error = str(e)
-
-            # Small delay before retry
-            if attempt < max_attempts - 1:
-                await asyncio.sleep(0.1)
-
-        # Only log if all retries failed
-        logger.debug(f"API failed for {tz_id}: {last_error}")
-        return None
-
-    def _get_cached_time(self, tz_id: str) -> Optional[datetime]:
-        """Get cached time if still valid."""
-        if tz_id in self._time_cache:
-            cached = self._time_cache[tz_id]
-            age = time.time() - cached["fetched_at"]
-            if age < TIME_CACHE_TTL:
-                # Adjust cached time by elapsed seconds
-                elapsed = timedelta(seconds=age)
-                return cached["datetime"] + elapsed
-        return None
-
-    async def get_current_time_async(self, tz_id: str) -> datetime:
-        """Get the current time in a specific timezone using WorldTimeAPI."""
-        # Check cache first
-        cached = self._get_cached_time(tz_id)
-        if cached:
-            return cached
-
-        # Fetch from API
-        api_result = await self._fetch_time_from_api(tz_id)
-        if api_result:
-            self._time_cache[tz_id] = api_result
-            return api_result["datetime"]
-
-        # Fallback to local zoneinfo (debug level - not a critical issue)
-        logger.debug(f"Using local time for {tz_id}")
-        return self.get_current_time(tz_id)
-
     def get_current_time(self, tz_id: str) -> datetime:
-        """Get the current time in a specific timezone (sync fallback)."""
+        """Get the current time in a specific timezone."""
         try:
             tz = ZoneInfo(tz_id)
             return datetime.now(tz)
         except Exception as e:
             logger.error(f"Error getting time for {tz_id}: {e}")
             return datetime.now(ZoneInfo("UTC"))
-
-    async def prefetch_times(self, tz_ids: List[str]) -> None:
-        """Prefetch times for multiple timezones in parallel."""
-        # Filter out already cached
-        to_fetch = [tz for tz in tz_ids if self._get_cached_time(tz) is None]
-
-        if not to_fetch:
-            return
-
-        # Fetch all in parallel
-        tasks = [self._fetch_time_from_api(tz) for tz in to_fetch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        success_count = 0
-        for tz_id, result in zip(to_fetch, results):
-            if isinstance(result, dict) and result:
-                self._time_cache[tz_id] = result
-                success_count += 1
-
-        # Log summary instead of individual results
-        if to_fetch:
-            logger.info(f"WorldTimeAPI: fetched {success_count}/{len(to_fetch)} timezones")
 
     def format_time(self, dt: datetime, include_seconds: bool = False) -> str:
         """Format a datetime for display."""
@@ -396,16 +228,11 @@ class TimezoneService:
         return "UTC"
 
     def format_time_entry(self, tz_id: str, display_name: str, show_utc_offset: bool = False) -> str:
-        """
-        Format a single timezone entry with city, country, flag, and time.
-
-        Example: "🇺🇿 Tashkent, Uzbekistan: <b>00:55</b>"
-        """
+        """Format a single timezone entry."""
         dt = self.get_current_time(tz_id)
         time_str = self.format_time(dt)
         country, flag = self.get_country_and_flag(tz_id)
 
-        # Build location string
         if country and flag:
             location = f"{flag} {display_name}, {country}"
         elif country:
@@ -419,43 +246,30 @@ class TimezoneService:
         else:
             return f"{location}: <b>{time_str}</b>"
 
-    async def format_all_times(
+    def format_all_times(
         self,
         timezones: Dict[str, "TimezoneEntry"],
         is_live: bool = False,
         show_utc_offset: bool = False
     ) -> str:
-        """
-        Format current times for all group timezones.
-
-        Uses WorldTimeAPI for accurate times. Fetches all in parallel.
-        Uses blockquote formatting. Sorted earliest to latest by UTC offset.
-        """
+        """Format current times for all group timezones."""
         if not timezones:
             return "No timezones configured for this group.\n\nAdmins can add timezones with /addtime <code>&lt;city&gt;</code>"
 
-        # Prefetch all times in parallel
-        tz_ids = [entry.tz for entry in timezones.values()]
-        await self.prefetch_times(tz_ids)
-
         lines = ["<b>Current Times</b>\n"]
 
-        # Get times and sort by UTC offset
-        tz_times: List[Tuple["TimezoneEntry", datetime]] = []
-        for entry in timezones.values():
-            dt = await self.get_current_time_async(entry.tz)
-            tz_times.append((entry, dt))
-
         # Sort by UTC offset (earliest → latest)
-        tz_times.sort(key=lambda x: x[1].utcoffset() or timedelta(0))
+        sorted_tzs = sorted(
+            timezones.values(),
+            key=lambda e: self.get_current_time(e.tz).utcoffset() or timedelta(0)
+        )
 
-        # Build blockquote with entries
         blockquote_lines = []
-        for entry, dt in tz_times:
+        for entry in sorted_tzs:
+            dt = self.get_current_time(entry.tz)
             time_str = self.format_time(dt)
             country, flag = self.get_country_and_flag(entry.tz)
 
-            # Build location string
             if country and flag:
                 location = f"{flag} {entry.display_name}, {country}"
             elif country:
@@ -463,7 +277,6 @@ class TimezoneService:
             else:
                 location = entry.display_name
 
-            # Build time display (bold time)
             if show_utc_offset:
                 offset_str = self.format_offset(dt)
                 blockquote_lines.append(f"{location}: <b>{time_str}</b> ({offset_str})")
@@ -483,9 +296,7 @@ class TimezoneService:
         from_tz: str,
         to_timezones: List[Tuple[str, str]]
     ) -> Optional[str]:
-        """
-        Convert a time from one timezone to multiple others.
-        """
+        """Convert a time from one timezone to multiple others."""
         parsed_time = self._parse_time(time_str)
         if parsed_time is None:
             return None
@@ -516,7 +327,6 @@ class TimezoneService:
             f"\n{time_str} in <b>{src_full}</b>\n"
         ]
 
-        # Build blockquote with conversions
         blockquote_lines = []
         for tz_id, display_name in to_timezones:
             try:
@@ -534,7 +344,6 @@ class TimezoneService:
                 else:
                     day_marker = ""
 
-                # Build location string
                 if country and flag and "(you)" not in display_name:
                     location = f"{flag} {display_name}, {country}"
                 elif country and "(you)" not in display_name:
@@ -555,21 +364,21 @@ class TimezoneService:
         """Parse various time formats into (hour, minute)."""
         time_str = time_str.strip().lower()
 
-        # Try 24h format: HH:MM
+        # 24h format: HH:MM
         match = re.match(r"^(\d{1,2}):(\d{2})$", time_str)
         if match:
             hour, minute = int(match.group(1)), int(match.group(2))
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 return (hour, minute)
 
-        # Try 24h compact: HHMM
+        # 24h compact: HHMM
         match = re.match(r"^(\d{2})(\d{2})$", time_str)
         if match:
             hour, minute = int(match.group(1)), int(match.group(2))
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 return (hour, minute)
 
-        # Try 12h format: H:MMam/pm or Hpm
+        # 12h format: H:MMam/pm
         match = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$", time_str)
         if match:
             hour = int(match.group(1))
@@ -583,7 +392,7 @@ class TimezoneService:
                     hour = 0
                 return (hour, minute)
 
-        # Try just hour: "18"
+        # Just hour: "18"
         match = re.match(r"^(\d{1,2})$", time_str)
         if match:
             hour = int(match.group(1))
@@ -592,9 +401,9 @@ class TimezoneService:
 
         return None
 
-    async def get_user_time_display(self, tz_id: str, display_name: str) -> str:
+    def get_user_time_display(self, tz_id: str, display_name: str) -> str:
         """Format user's current time for /timehere."""
-        dt = await self.get_current_time_async(tz_id)
+        dt = self.get_current_time(tz_id)
         day = dt.strftime("%A")
         country = self.get_country(tz_id)
         flag = self.get_flag(tz_id)

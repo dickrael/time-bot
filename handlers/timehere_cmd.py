@@ -53,7 +53,7 @@ def register_timehere_handler(app: Client, services):
             return
 
         # Show user's current time
-        text = await services.timezone.get_user_time_display(
+        text = services.timezone.get_user_time_display(
             user_data.timezone,
             user_data.display_name
         )

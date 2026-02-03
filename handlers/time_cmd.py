@@ -48,7 +48,7 @@ def register_time_handler(app: Client, services):
         if await is_private_chat(message):
             user_data = await services.store.get_user_timezone(user_id)
             if user_data:
-                text = await services.timezone.get_user_time_display(
+                text = services.timezone.get_user_time_display(
                     user_data.timezone,
                     user_data.display_name
                 )
@@ -88,7 +88,7 @@ def register_time_handler(app: Client, services):
         timezones = await services.store.get_group_timezones(chat_id)
 
         # Format message (not live)
-        text = await services.timezone.format_all_times(
+        text = services.timezone.format_all_times(
             timezones,
             is_live=False,
             show_utc_offset=config.show_utc_offset
@@ -157,7 +157,7 @@ def register_time_handler(app: Client, services):
         timezones = await services.store.get_group_timezones(chat_id)
 
         # Format initial message (live)
-        text = await services.timezone.format_all_times(
+        text = services.timezone.format_all_times(
             timezones,
             is_live=True,
             show_utc_offset=config.show_utc_offset
